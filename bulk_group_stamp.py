@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["ds-store"]
+# ///
 """
 bulk_group_stamp.py — enable Finder 'Group by Kind' for thousands of folders at once.
 
@@ -8,11 +12,11 @@ folder's .DS_Store, as an entry keyed by the child folder's name with code
 
 Usage:
     # Quit Finder first, then:
-    python3 bulk_group_stamp.py /tmp/fv_targets.txt
+    uv run bulk_group_stamp.py /tmp/fv_targets.txt
     # then relaunch Finder.
 
 Backups of every modified .DS_Store go to /tmp/dsstore_backups/.
-Requires: pip3 install --user --break-system-packages ds-store
+Dependencies are declared inline (PEP 723) — uv handles them automatically.
 """
 import os, sys, shutil, hashlib
 from collections import defaultdict

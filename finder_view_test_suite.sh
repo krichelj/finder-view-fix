@@ -151,8 +151,10 @@ EOF
 # bulk_group_stamp.py writes these; this test reads them back.
 if [ ! -s /tmp/fv_targets.txt ]; then
   report SKIP "T13 grouping stamped (GRP0 audit)" "no /tmp/fv_targets.txt — run bulk_group_stamp.py first"
+elif ! command -v uv >/dev/null 2>&1; then
+  report SKIP "T13 grouping stamped (GRP0 audit)" "uv not installed (brew install uv)"
 else
-  R=$(python3 - <<'PYEOF' 2>/dev/null
+  R=$(uv run --quiet --with ds-store python - <<'PYEOF' 2>/dev/null
 import os
 from collections import defaultdict
 try:
@@ -179,7 +181,7 @@ print(f"{ok} {miss}")
 PYEOF
 )
   if [ "$R" = "NOLIB" ]; then
-    report SKIP "T13 grouping stamped (GRP0 audit)" "pip3 install ds-store first"
+    report SKIP "T13 grouping stamped (GRP0 audit)" "ds-store unavailable via uv"
   else
     OKN=$(echo "$R" | awk '{print $1}'); MISSN=$(echo "$R" | awk '{print $2}')
     PCT=$(( OKN * 100 / (OKN + MISSN) ))

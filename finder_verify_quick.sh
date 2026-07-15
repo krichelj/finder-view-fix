@@ -18,8 +18,10 @@ SC=$(/usr/libexec/PlistBuddy -c "Print :StandardViewSettings:ExtendedListViewSet
 rm -f "$TMPPL"
 chk "global sort = Name" "$([ "$SC" = "name" ] && echo 1 || echo 0)" "sortColumn=${SC:-unset}"
 
-if [ -s /tmp/fv_targets.txt ]; then
-  R=$(python3 - <<'PYEOF' 2>/dev/null
+if ! command -v uv >/dev/null 2>&1; then
+  echo "SKIP | group-by-Kind stamps | uv not installed (brew install uv)"
+elif [ -s /tmp/fv_targets.txt ]; then
+  R=$(uv run --quiet --with ds-store python - <<'PYEOF' 2>/dev/null
 import os
 from collections import defaultdict
 from ds_store import DSStore
