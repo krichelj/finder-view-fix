@@ -1,5 +1,5 @@
 #!/bin/bash
-# finder_verify_quick.sh — WINDOWLESS verification of the uniform Finder view.
+# finder_verify_quick.sh - WINDOWLESS verification of the uniform Finder view.
 # Safe to run anytime; opens no windows, touches nothing.
 # Checks: global list view, global sort-by-Name, per-folder Group-by-Kind stamps.
 set -u
@@ -28,7 +28,10 @@ from ds_store import DSStore
 targets=[l.rstrip("\n") for l in open("/tmp/fv_targets.txt",encoding="utf-8") if l.strip()]
 bp=defaultdict(list)
 for t in targets:
-    if os.path.isdir(t): bp[os.path.dirname(t.rstrip('/'))].append(os.path.basename(t.rstrip('/')))
+    if not os.path.isdir(t): continue
+    t=t.rstrip('/')
+    if t==os.path.expanduser('~'): bp[t].append('.')   # home's own record is '.'
+    else: bp[os.path.dirname(t)].append(os.path.basename(t))
 ok=miss=0
 for parent,names in bp.items():
     ds=os.path.join(parent,".DS_Store"); e={}

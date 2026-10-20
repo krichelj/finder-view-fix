@@ -40,7 +40,7 @@ folder_test() { # $1=test name  $2=path
   esac
 }
 
-echo "Finder View Test Suite — $(date)"
+echo "Finder View Test Suite - $(date)"
 echo "Target: List view | Group by Kind | Sort by Name"
 echo "--------------------------------------------------------------------------"
 
@@ -62,11 +62,11 @@ rm -f "$TMPPL"
                    || report FAIL "T2 default sort column = Name" "sortColumn=${SC:-unset}"
 
 # T3: leftover per-folder overrides. NOTE: Finder recreates .DS_Store during
-# normal use — but post-fix they record the CORRECT view, so a modest count is
+# normal use - but post-fix they record the CORRECT view, so a modest count is
 # fine. This test only catches a wipe that never happened (thousands left).
 CNT=$(find "$HOME" -name .DS_Store -type f ! -path "$HOME/Desktop/.DS_Store" 2>/dev/null | wc -l | tr -d ' ')
 [ "$CNT" -le 500 ] && report PASS "T3 old overrides wiped" "$CNT present (excl. Desktop; fresh ones are harmless)" \
-                   || report FAIL "T3 old overrides wiped" "$CNT present — wipe likely never ran"
+                   || report FAIL "T3 old overrides wiped" "$CNT present - wipe likely never ran"
 
 # T4: brand-new folder inherits defaults
 T4DIR=$(mktemp -d "$HOME/Documents/fvtest_new.XXXX")
@@ -91,7 +91,7 @@ folder_test "T9a Google Drive" "$HOME/My Drive"
 ODDIR=$(ls -d "$HOME/Library/CloudStorage/"OneDrive-* 2>/dev/null | head -1)
 folder_test "T9b OneDrive" "${ODDIR:-/nonexistent}"
 
-# T10: previously-customized folder — the core mechanism test.
+# T10: previously-customized folder - the core mechanism test.
 # Force icon view (creates .DS_Store override), confirm override wins,
 # delete override + restart Finder, confirm defaults win again.
 T10DIR=$(mktemp -d "$HOME/Documents/fvtest_custom.XXXX")
@@ -113,7 +113,7 @@ case "$OUT1" in
 esac
 rm -f "$T10DIR/.DS_Store"
 # IMPORTANT (discovered empirically on macOS 26): switching any window's view
-# also flips the GLOBAL new-window default — macOS records the last-used view.
+# also flips the GLOBAL new-window default - macOS records the last-used view.
 # So after T10a we must restore defaults exactly like the fix script does:
 # quit Finder (it persists prefs on quit), re-assert defaults, relaunch.
 osascript -e 'tell application "Finder" to quit' 2>/dev/null
@@ -146,11 +146,11 @@ EOF
 [ "$OUT" = "true" ] && report PASS "T12 new Finder window (Cmd+N)" "" \
                     || report FAIL "T12 new Finder window (Cmd+N)" "got: $OUT"
 
-# T13: grouping stamped — windowless audit. macOS 26 stores a folder's
+# T13: grouping stamped - windowless audit. macOS 26 stores a folder's
 # grouping in its PARENT's .DS_Store under the child's name, code GRP0.
 # bulk_group_stamp.py writes these; this test reads them back.
 if [ ! -s /tmp/fv_targets.txt ]; then
-  report SKIP "T13 grouping stamped (GRP0 audit)" "no /tmp/fv_targets.txt — run bulk_group_stamp.py first"
+  report SKIP "T13 grouping stamped (GRP0 audit)" "no /tmp/fv_targets.txt - run bulk_group_stamp.py first"
 elif ! command -v uv >/dev/null 2>&1; then
   report SKIP "T13 grouping stamped (GRP0 audit)" "uv not installed (brew install uv)"
 else
@@ -186,11 +186,11 @@ PYEOF
     OKN=$(echo "$R" | awk '{print $1}'); MISSN=$(echo "$R" | awk '{print $2}')
     PCT=$(( OKN * 100 / (OKN + MISSN) ))
     [ "$PCT" -ge 95 ] && report PASS "T13 grouping stamped (GRP0 audit)" "$OKN ok, $MISSN missing (${PCT}%)" \
-                      || report FAIL "T13 grouping stamped (GRP0 audit)" "$OKN ok, $MISSN missing (${PCT}%) — rerun bulk_group_stamp.py"
+                      || report FAIL "T13 grouping stamped (GRP0 audit)" "$OKN ok, $MISSN missing (${PCT}%) - rerun bulk_group_stamp.py"
   fi
 fi
 
-# T14: no drift — global default survived the whole suite
+# T14: no drift - global default survived the whole suite
 V2=$(defaults read com.apple.finder FXPreferredViewStyle 2>/dev/null)
 [ "$V2" = "Nlsv" ] && report PASS "T14 no drift: global default still list" "" \
                    || report FAIL "T14 no drift: global default still list" "FXPreferredViewStyle=$V2"

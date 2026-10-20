@@ -1,5 +1,5 @@
 #!/bin/bash
-# run.sh — one shot: every Finder folder becomes list view, grouped by Kind,
+# run.sh - one shot: every Finder folder becomes list view, grouped by Kind,
 # sorted by Name. Idempotent; rerun anytime (e.g. after creating new folders).
 set -e
 cd "$(dirname "$0")"
