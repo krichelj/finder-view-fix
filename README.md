@@ -57,6 +57,15 @@ bash tests/run_tests.sh        # N=40 bash tests/run_tests.sh for a bigger live 
 
 T3/T5 drive Finder; T5 needs Screen Recording for the calling app.
 
+### Independent edge-case suite
+
+```sh
+bash tests/independent/run.sh                 # pytest -n auto (one process per core)
+uv run python tests/independent/scan_real.py  # validate every real .DS_Store under $HOME
+```
+
+Validates output with its own `.DS_Store` parser (`dsparse.py`, no shared code with `ds-store` or the tool) that checks B-tree structure: page bounds, uniform leaf depth, record/node counts, Finder key order. Covers 0 to 6000 records, sorted/reversed/shuffled inserts, exact node-capacity boundaries, 255-char Unicode/emoji names, case-only collisions, `.` home record, foreign record preservation, malformed plists, byte-identical idempotence, missing/file/read-only/corrupt targets, backups, `make_targets.sh` exclusions and odd names (quotes, leading dashes, newlines, symlinks), audit defect detection, and parallel runs in threads and processes, including 8 processes writing one `.DS_Store` while a thread parses it. `BGS_PATH=<file>` runs the suite against another version of the stamper.
+
 ## Caveats
 
 - Wiping `.DS_Store` resets saved window sizes/positions and custom icon layouts (Desktop's own layout is preserved). Folder *contents* are untouched.

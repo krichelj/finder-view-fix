@@ -18,7 +18,7 @@ Usage:
 Backups of every modified .DS_Store go to /tmp/dsstore_backups/.
 Dependencies are declared inline (PEP 723) - uv handles them automatically.
 """
-import os, sys, shutil, hashlib, plistlib
+import os, sys, shutil, hashlib, plistlib, tempfile
 from collections import defaultdict
 from ds_store import DSStore
 from ds_store.store import DSStoreEntry
@@ -74,10 +74,16 @@ def _pack(items, children, page):
     nodes, seps, cur, size, i = [], [], [], 8, 0
     while i < len(items):
         need = ptr + items[i].byte_length()
-        if cur and size + need > page and i < len(items) - 1:
-            nodes.append(cur); seps.append(i); cur, size = [], 8
-            i += 1  # items[i] becomes the separator
-            continue
+        if cur and size + need > page:
+            if i < len(items) - 1:
+                nodes.append(cur); seps.append(i); cur, size = [], 8
+                i += 1  # items[i] becomes the separator
+                continue
+            # Last item does not fit and cannot be a separator (no right node
+            # would follow): promote the current node's last item instead and
+            # put the final item alone in a new right node.
+            assert len(cur) > 1
+            seps.append(cur.pop()); nodes.append(cur); cur, size = [], 8
         cur.append(i); size += need; i += 1
     nodes.append(cur)
     return nodes, seps
@@ -90,10 +96,16 @@ def write_records(ds_path, recs):
     _insert_inner -> BuddyError), and its initial_entries bulk builder also
     raises IndexError for multi-level trees. Those failures left ~13k folders
     unstamped. Only its buddy allocator and entry serialiser are used here."""
-    ents = sorted(DSStoreEntry(f, c.encode(), t, v) for (f, c), (t, v) in recs.items())
-    tmp = ds_path + ".fvtmp"
-    if os.path.exists(tmp):
-        os.remove(tmp)
+    # Explicit total order (case-insensitive name, then code), as Finder
+    # searches. DSStoreEntry.__lt__ is not a strict weak order for names that
+    # differ only in case ("A" vs "a"), so sorted() on it can interleave them.
+    ents = sorted((DSStoreEntry(f, c.encode(), t, v) for (f, c), (t, v) in recs.items()),
+                  key=lambda e: (e.filename.lower(), e.filename, e.code))
+    # Unique temp file in the same directory: concurrent runs must not share
+    # one temp path, and os.replace keeps readers from seeing a partial file.
+    fd, tmp = tempfile.mkstemp(prefix=".DS_Store.", suffix=".fvtmp", dir=os.path.dirname(ds_path) or ".")
+    os.close(fd)
+    os.remove(tmp)
     with DSStore.open(tmp, "w+") as d:
         page = d._page_size
         items, children, levels, nnodes = ents, None, 0, 0
