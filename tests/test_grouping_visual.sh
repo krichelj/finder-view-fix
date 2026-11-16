@@ -6,7 +6,11 @@
 # stamped one shows Kind group headers and the control shows none.
 # Needs Screen Recording for the calling app.
 set -u -o pipefail; cd "$(dirname "$0")/.."
-FX=$(mktemp -d "$HOME/.fv_e2e.XXXX"); trap 'rm -rf "$FX"' EXIT
+# The FinderViewEnforcer agent would group the control folder too: pause it.
+LABEL="com.krichelj.finderviewenforcer"; DOM="gui/$(id -u)"; PL="$HOME/Library/LaunchAgents/$LABEL.plist"
+AGENT=0; launchctl print "$DOM/$LABEL" >/dev/null 2>&1 && { AGENT=1; launchctl bootout "$DOM/$LABEL"; }
+FX=$(mktemp -d "$HOME/.fv_e2e.XXXX")
+trap 'rm -rf "$FX"; [ $AGENT = 1 ] && launchctl bootstrap "$DOM" "$PL"' EXIT
 for d in grouped control; do
   mkdir -p "$FX/$d/zsub"; echo x > "$FX/$d/notes.txt"; echo 'print(1)' > "$FX/$d/tool.py"; echo '#!/bin/sh' > "$FX/$d/run.sh"
 done
@@ -20,21 +24,10 @@ ds = sys.argv[1] + "/.DS_Store"; r = b.read_records(ds)
 r[("control", "GRP0")] = ("ustr", "None"); b.write_records(ds, r)
 PY
 open -a Finder; sleep 2
-shot() {  # $1 folder -> OCR lines of its Finder window
-  osascript -e "tell application \"Finder\"
-    activate
-    set w to make new Finder window to (POSIX file \"$1\" as alias)
-    set bounds of w to {80, 80, 1100, 700}
-  end tell" >/dev/null
-  # capture the file list only (sidebar starts at the window's left edge)
-  sleep 2; screencapture -x -R380,150,720,550 "$FX/$2.png"
-  cp "$FX/$2.png" "tests/shots/t5_$2.png"
-  osascript -e 'tell application "Finder" to close front window' >/dev/null
-  swift tests/ocr.swift "$FX/$2.png"
-}
-G=$(shot "$FX/grouped" grouped); C=$(shot "$FX/control" control)
-hdr() { echo "$1" | grep -cxE 'Folders|Documents|Developer|Text|Other'; }
-NG=$(hdr "$G"); NC=$(hdr "$C")
-echo "grouped headers: $(echo "$G" | grep -xE 'Folders|Documents|Developer|Text|Other' | tr '\n' ' ')($NG)"
-echo "control headers: $(echo "$C" | grep -xE 'Folders|Documents|Developer|Text|Other' | tr '\n' ' ')($NC)"
-if [ "$NG" -ge 2 ] && [ "$NC" -eq 0 ]; then echo "T5 PASS"; else echo "T5 FAIL"; exit 1; fi
+# Finder renders each fixture; visual_sample.sh captures the window by ID
+# and OCRs it (grouped = list header shows a Kind label, not "Name").
+G=$(bash tests/visual_sample.sh 0 "$FX/grouped"); C=$(bash tests/visual_sample.sh 0 "$FX/control")
+echo "grouped: $G"; echo "control: $C"
+cp tests/shots/visual/1.png tests/shots/t5_control.png 2>/dev/null
+NG=$(echo "$G" | grep -c '^OK'); NC=$(echo "$C" | grep -c '^OK')
+if [ "$NG" -eq 1 ] && [ "$NC" -eq 0 ]; then echo "T5 PASS"; else echo "T5 FAIL"; exit 1; fi

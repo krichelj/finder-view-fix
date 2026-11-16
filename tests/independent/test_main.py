@@ -37,12 +37,21 @@ def test_mixed_bad_inputs(tmp_path):
     lst = tmp_path / "l"
     write_list(lst, [str(good) + "/", str(tmp_path / "missing"), str(afile), str(ro / "child"),
                      str(corrupt / "k"), "", "   ", str(good)])
+    ro2 = tmp_path / "ro2"; (ro2 / "locked").mkdir(parents=True)
+    os.chmod(ro2 / "locked", 0o555); os.chmod(ro2, 0o555)
+    write_list(lst, [str(good) + "/", str(tmp_path / "missing"), str(afile), str(ro / "child"),
+                     str(corrupt / "k"), "", "   ", str(good), str(ro2 / "locked")])
     try:
         out = workers.run_main(str(lst))
     finally:
-        os.chmod(ro, 0o755)
+        os.chmod(ro, 0o755); os.chmod(ro2, 0o755); os.chmod(ro2 / "locked", 0o755)
     assert stamped(str(good)) and stamped(str(corrupt / "k"))
+    # parent unwritable, folder writable: Finder's own "." record in the folder
     assert not os.path.exists(ro / ".DS_Store")
+    self_rec = dsparse.as_dict(dsparse.parse(str(ro / "child" / ".DS_Store")))
+    assert self_rec[(".", "GRP0")] == "Kind" and self_rec[(".", "vstl")] == b"Nlsv"
+    # both unwritable: skipped, nothing written anywhere
+    assert not os.path.exists(ro2 / ".DS_Store") and not os.path.exists(ro2 / "locked" / ".DS_Store")
     assert "parent not writable" in out and "missing" in out and "recreated fresh" in out
     assert "failed 0" in out
 
@@ -114,15 +123,41 @@ def test_concurrent_writers_same_parent_never_corrupt(tmp_path):
 
 
 # ---------- make_targets.sh ----------
-def run_make_targets(home):
-    env = dict(os.environ, HOME=str(home))
-    out = "/tmp/fv_targets.txt"
-    backup = open(out, "rb").read() if os.path.exists(out) else None
-    try:
-        subprocess.run(["bash", os.path.join(REPO, "make_targets.sh")], env=env, check=True, capture_output=True)
-        return open(out, encoding="utf-8").read().splitlines()
-    finally:
-        if backup is not None: open(out, "wb").write(backup)
+def run_make_targets(home, extra=""):
+    out = str(home) + ".targets"
+    env = dict(os.environ, HOME=str(home), FV_TARGETS=out, FV_EXTRA_ROOTS=extra)
+    subprocess.run(["bash", os.path.join(REPO, "make_targets.sh")], env=env, check=True, capture_output=True)
+    return open(out, encoding="utf-8").read().splitlines()
+
+
+def test_make_targets_extra_roots(tmp_path):
+    home = tmp_path / "h"; (home / "Library" / "CloudStorage" / "GD-x" / "My Drive" / "p q").mkdir(parents=True)
+    cloud = home / "Library" / "CloudStorage" / "GD-x"
+    (cloud / "My Drive" / ".hidden" / "y").mkdir(parents=True)
+    (cloud / "My Drive" / "Thing.app" / "Contents").mkdir(parents=True)
+    apps = tmp_path / "Apps"; (apps / "Utilities").mkdir(parents=True)
+    got = set(run_make_targets(home, f"{cloud}\n{apps}\n{tmp_path / 'does-not-exist'}"))
+    for p in [cloud, cloud / "My Drive", cloud / "My Drive" / "p q", apps, apps / "Utilities"]:
+        assert str(p) in got, p
+    assert not any(".hidden" in g or "Thing.app" in g for g in got)
+    # ~/Library itself stays excluded unless named as a root
+    assert not any(g.startswith(str(home / "Library")) and not g.startswith(str(cloud)) for g in got)
+
+
+def test_default_extra_roots_follow_home(tmp_path):
+    """Without FV_EXTRA_ROOTS the script must pick up every ~/Library/CloudStorage/* root and iCloud Drive."""
+    home = tmp_path / "h"
+    for r in ["Library/CloudStorage/GoogleDrive-a/My Drive/x", "Library/CloudStorage/OneDrive-b/y",
+              "Library/Mobile Documents/com~apple~CloudDocs/z"]:
+        (home / r).mkdir(parents=True)
+    out = str(home) + ".targets"
+    env = {k: v for k, v in os.environ.items() if k != "FV_EXTRA_ROOTS"}
+    env.update(HOME=str(home), FV_TARGETS=out)
+    subprocess.run(["bash", os.path.join(REPO, "make_targets.sh")], env=env, check=True, capture_output=True)
+    got = set(open(out, encoding="utf-8").read().splitlines())
+    for r in ["Library/CloudStorage/GoogleDrive-a/My Drive/x", "Library/CloudStorage/OneDrive-b/y",
+              "Library/Mobile Documents/com~apple~CloudDocs/z"]:
+        assert str(home / r) in got, r
 
 
 def test_make_targets_exclusions_and_odd_names(tmp_path):

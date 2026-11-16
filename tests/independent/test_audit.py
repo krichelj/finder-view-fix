@@ -6,7 +6,7 @@ AUDIT = os.path.join(REPO, "tests", "audit_views.py")
 
 
 def audit(home, *args):
-    env = dict(os.environ, HOME=str(home))
+    env = dict(os.environ, HOME=str(home), FV_EXTRA_ROOTS="")
     r = subprocess.run([sys.executable, AUDIT, *args], env=env, capture_output=True, text=True)
     return r.returncode, r.stdout
 
@@ -37,3 +37,15 @@ def test_clean_tree_passes_and_unreadable_flagged(tmp_path, bgs):
     (tmp_path / "a" / "b").mkdir(); (tmp_path / "a" / ".DS_Store").write_bytes(b"garbage" * 100)
     rc, out = audit(tmp_path)
     assert rc == 1 and "unreadable" in out
+
+
+def test_unwritable_parent_uses_self_record(tmp_path, bgs):
+    home = tmp_path; (home / "ro" / "ok").mkdir(parents=True); (home / "ro" / "bad").mkdir()
+    recs = {}; bgs.stamp(recs, "."); bgs.write_records(str(home / "ro" / "ok" / ".DS_Store"), recs)
+    top = {}; bgs.stamp(top, "."); bgs.stamp(top, "ro"); bgs.write_records(str(home / ".DS_Store"), top)
+    os.chmod(home / "ro", 0o555)
+    try:
+        rc, out = audit(home, "--only", str(home / "ro" / "ok"), str(home / "ro" / "bad"))
+    finally:
+        os.chmod(home / "ro", 0o755)
+    assert rc == 1 and "1 non-uniform" in out and "/ro/bad" in out and "/ro/ok" not in out

@@ -10,13 +10,14 @@ lsvp/lsvC sortColumn is 'name'. Prints counts + offenders; exit 1 if any."""
 import os, sys, plistlib
 from ds_store import DSStore
 
-SKIP = {"Library", "node_modules", ".Trash"}
+SKIP = {"node_modules", ".Trash"}
 BUNDLE = (".app", ".bundle", ".framework", ".photoslibrary", ".pkg", ".xcodeproj", ".lproj", ".xcassets", ".plugin", ".kext")
 
 def folders(home):
     yield home
     for root, dirs, _ in os.walk(home):
         dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP and not d.endswith(BUNDLE)
+                   and os.path.join(root, d) != os.path.join(HOME, "Library")
                    and not os.path.islink(os.path.join(root, d))]
         for d in dirs:
             yield os.path.join(root, d)
@@ -43,6 +44,8 @@ def sortcol(v):
 def check(path):
     p = path.rstrip("/")
     parent, name = (p, ".") if p == HOME else (os.path.dirname(p), os.path.basename(p))
+    if name != "." and not os.access(parent, os.W_OK):
+        parent, name = p, "."   # unwritable parent: Finder uses the folder's own "." record
     e = entries(parent)
     if "__error__" in e: return ["unreadable .DS_Store"]
     r = e.get(name, {})
@@ -63,11 +66,16 @@ if __name__ == "__main__":
         print(f"audited {len(fs)} folders, {len(off)} non-uniform")
         for f, b in off[:15]: print("  ", f, b)
         sys.exit(1 if off else 0)
-    roots = sys.argv[1:] or [HOME]
+    extra = os.environ.get("FV_EXTRA_ROOTS")
+    if extra is None:
+        cs = os.path.join(HOME, "Library", "CloudStorage")
+        extra = "\n".join([*(os.path.join(cs, d) for d in (os.listdir(cs) if os.path.isdir(cs) else [])),
+                            os.path.join(HOME, "Library", "Mobile Documents", "com~apple~CloudDocs"), "/Applications"])
+    roots = sys.argv[1:] or [HOME, *[r for r in extra.split("\n") if r and os.path.isdir(r)]]
     tot = 0; off = []
     for root in roots:
-        for f in (folders(root) if root == HOME else [root, *[os.path.join(a, d) for a, ds, _ in os.walk(root) for d in ds if not d.startswith('.')]]):
-            if not os.access(os.path.dirname(f.rstrip('/')) or "/", os.W_OK): continue
+        for f in folders(root):
+            if not os.access(os.path.dirname(f.rstrip('/')) or "/", os.W_OK) and not os.access(f, os.W_OK): continue
             tot += 1
             b = check(f)
             if b: off.append((f, b))

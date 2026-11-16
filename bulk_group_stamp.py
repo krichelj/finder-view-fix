@@ -153,8 +153,14 @@ def main(list_path):
             skipped.append((t, "missing"))
             continue
         if not os.access(parent, os.W_OK):
-            skipped.append((t, "parent not writable"))
-            continue
+            # Finder keeps a folder's view in its OWN .DS_Store under the "."
+            # record when the parent is unwritable (e.g. /Applications, cloud
+            # drive roots under ~/Library/CloudStorage).
+            if name != "." and os.access(t, os.W_OK):
+                parent, name = t.rstrip("/"), "."
+            else:
+                skipped.append((t, "parent not writable"))
+                continue
         by_parent[parent].append(name)
 
     bdir = "/tmp/dsstore_backups"
