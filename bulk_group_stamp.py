@@ -4,19 +4,21 @@
 # dependencies = ["ds-store"]
 # ///
 """
-bulk_group_stamp.py - enable Finder 'Group by Kind' for thousands of folders at once.
+bulk_group_stamp.py - make Finder group folders by Kind, in bulk.
 
-DISCOVERY (macOS 26): Finder stores a folder's grouping setting in the PARENT
-folder's .DS_Store, as an entry keyed by the child folder's name with code
-'GRP0' (value: 'Kind', 'None', 'Name', ...). No window automation needed.
+Finder has no global default for grouping (macOS 26-27). It stores grouping per
+folder, as record GRP0 in the PARENT folder's .DS_Store keyed by the child's
+name (or in the folder's own "." record when the parent is unwritable).
+List view and sort by Name are global defaults (see setup.sh), so this tool
+only writes GRP0=Kind; besides that it corrects a per-folder view or sort that
+Finder already saved as something else (vstl != Nlsv, sortColumn != name).
+Stores that already comply are not rewritten.
 
-Usage:
-    # Quit Finder first, then:
-    uv run bulk_group_stamp.py /tmp/fv_targets.txt
-    # then relaunch Finder.
+Finder caches .DS_Store contents and writes them back, so run this with Finder
+stopped (maintain.sh does that).
 
-Backups of every modified .DS_Store go to /tmp/dsstore_backups/.
-Dependencies are declared inline (PEP 723) - uv handles them automatically.
+Usage: uv run bulk_group_stamp.py [--check] <folder-list-file>
+  --check  count folders that need a change, write nothing (exit 1 if any)
 """
 import os, sys, shutil, hashlib, plistlib, tempfile
 from collections import defaultdict
@@ -33,28 +35,27 @@ def _name_sorted(v):
         pl = plistlib.loads(bytes(v)) if raw else dict(v)
     except Exception:
         return None
+    if pl.get("sortColumn", "name") == "name":
+        return v  # already name (or unset, which means name): leave the bytes alone
     pl["sortColumn"] = "name"
     return plistlib.dumps(pl, fmt=plistlib.FMT_BINARY) if raw else pl
 
 
 def stamp(recs, n):
-    """recs: {(filename, code): (type, value)}. Per-folder overrides beat the
-    global defaults, so make them uniform: group=Kind, view=list, sort=name."""
-    recs[(n, "GRP0")] = ("ustr", GROUP_VALUE)
-    recs[(n, "vstl")] = ("type", b"Nlsv")
-    recs[(n, "vSrn")] = ("long", 1)
-    if (n, "lsvC") not in recs:
-        # Without a saved lsvC Finder seeds one from its own per-folder default
-        # (e.g. Downloads -> Date Added) the first time the folder opens, which
-        # beats the global sort. Pre-seed it with sort = name.
-        recs[(n, "lsvC")] = ("blob", plistlib.dumps(
-            {"sortColumn": "name", "viewOptionsVersion": 1}, fmt=plistlib.FMT_BINARY))
+    """recs: {(filename, code): (type, value)}. Make folder n grouped by Kind and
+    fix a saved non-list view or non-name sort. Returns True if recs changed."""
+    changed = False
+    if recs.get((n, "GRP0"), (None, None))[1] != GROUP_VALUE:
+        recs[(n, "GRP0")] = ("ustr", GROUP_VALUE); changed = True
+    if (n, "vstl") in recs and bytes(recs[(n, "vstl")][1]) != b"Nlsv":
+        recs[(n, "vstl")] = ("type", b"Nlsv"); changed = True
     for k in ("lsvp", "lsvC"):
         if (n, k) in recs:
             t, v = recs[(n, k)]
             nv = _name_sorted(v)
-            if nv is not None:
-                recs[(n, k)] = (t, nv)
+            if nv is not None and nv != v:
+                recs[(n, k)] = (t, nv); changed = True
+    return changed
 
 
 def read_records(ds_path):
@@ -137,7 +138,13 @@ def write_records(ds_path, recs):
     os.replace(tmp, ds_path)
 
 
-def main(list_path):
+def _in_cloud_storage(path):
+    cs = os.path.join(os.path.expanduser("~"), "Library", "CloudStorage") + os.sep
+    return (path.rstrip("/") + os.sep).startswith(cs)
+
+
+def main(list_path, check=False):
+    """Returns the number of folders that needed (or, with check, need) a change."""
     with open(list_path, encoding="utf-8") as f:
         targets = [l.rstrip("\n") for l in f if l.strip()]
 
@@ -154,46 +161,61 @@ def main(list_path):
             continue
         if not os.access(parent, os.W_OK):
             # Finder keeps a folder's view in its OWN .DS_Store under the "."
-            # record when the parent is unwritable (e.g. /Applications, cloud
-            # drive roots under ~/Library/CloudStorage).
-            if name != "." and os.access(t, os.W_OK):
+            # record when the parent is unwritable (e.g. /Applications), but
+            # not for the top folders of a cloud drive (read-only FileProvider
+            # account folder): Finder has nowhere to save those, so skip them.
+            if name != "." and os.access(t, os.W_OK) and not _in_cloud_storage(parent):
                 parent, name = t.rstrip("/"), "."
             else:
                 skipped.append((t, "parent not writable"))
                 continue
         by_parent[parent].append(name)
 
-    bdir = "/tmp/dsstore_backups"
-    os.makedirs(bdir, exist_ok=True)
-
-    written = failed = stores = 0
+    bdir = os.path.join(home, "Library", "Application Support", "finder-view-fix", "unreadable-backups")
+    changed = stores = failed = 0
     fails = []
     for parent, names in sorted(by_parent.items()):
         ds_path = os.path.join(parent, ".DS_Store")
-        if os.path.exists(ds_path):
-            h = hashlib.md5(parent.encode()).hexdigest()[:12]
-            shutil.copy2(ds_path, os.path.join(bdir, f"{h}.DS_Store"))
         try:
             recs = read_records(ds_path)
         except Exception as ex:
-            # Unparseable existing store (already backed up): start fresh.
-            recs = {}
+            # Unparseable store: keep a copy (outside /tmp, never overwritten)
+            # and start fresh.
+            recs = None
+            if not check:
+                os.makedirs(bdir, exist_ok=True)
+                h = hashlib.md5(parent.encode()).hexdigest()[:12]
+                shutil.copy2(ds_path, os.path.join(bdir, f"{h}-{int(os.path.getmtime(ds_path))}.DS_Store"))
             fails.append(f"{parent}: unreadable, recreated fresh ({ex})")
+        n_changed = 0
+        recs = recs if recs is not None else {}
+        for n in names:
+            n_changed += stamp(recs, n)
+        if n_changed == 0:
+            continue
+        changed += n_changed
+        if check:
+            continue
         try:
-            for n in names:
-                stamp(recs, n)
             write_records(ds_path, recs)
-            written += len(names); stores += 1
+            stores += 1
         except Exception as ex:
-            failed += len(names)
+            failed += n_changed
             fails.append(f"{parent}: {ex}")
 
-    print(f"stamped {written} folders across {stores} .DS_Store files; "
+    verb = "need a change" if check else "changed"
+    print(f"{len(targets)} folders; {changed} {verb} across {stores if not check else '-'} .DS_Store files written; "
           f"failed {failed}; skipped {len(skipped)}")
-    for s in fails[:10]:
-        print("  FAIL:", s)
+    for s_ in fails[:10]:
+        print("  FAIL:", s_)
     for t, why in skipped[:10]:
         print("  SKIP:", why, "->", t)
+    return changed
+
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "/tmp/fv_targets.txt")
+    args = sys.argv[1:]
+    chk = "--check" in args
+    args = [a for a in args if a != "--check"]
+    n = main(args[0] if args else "/tmp/fv_targets.txt", check=chk)
+    sys.exit(1 if chk and n else 0)

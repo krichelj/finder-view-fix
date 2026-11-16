@@ -28,7 +28,8 @@ def write_list(path, items):
     with open(path, "w", encoding="utf-8") as f: f.write("\n".join(items) + "\n")
 
 
-def test_mixed_bad_inputs(tmp_path):
+def test_mixed_bad_inputs(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "fakehome"))   # backups land here, not in the real home
     good = tmp_path / "good"; good.mkdir()
     afile = tmp_path / "afile"; afile.write_text("x")
     ro = tmp_path / "ro"; (ro / "child").mkdir(parents=True); os.chmod(ro, 0o555)
@@ -49,7 +50,7 @@ def test_mixed_bad_inputs(tmp_path):
     # parent unwritable, folder writable: Finder's own "." record in the folder
     assert not os.path.exists(ro / ".DS_Store")
     self_rec = dsparse.as_dict(dsparse.parse(str(ro / "child" / ".DS_Store")))
-    assert self_rec[(".", "GRP0")] == "Kind" and self_rec[(".", "vstl")] == b"Nlsv"
+    assert self_rec[(".", "GRP0")] == "Kind"
     # both unwritable: skipped, nothing written anywhere
     assert not os.path.exists(ro2 / ".DS_Store") and not os.path.exists(ro2 / "locked" / ".DS_Store")
     assert "parent not writable" in out and "missing" in out and "recreated fresh" in out
@@ -66,13 +67,18 @@ def test_home_target_uses_dot_record(tmp_path, monkeypatch):
     assert d[(".", "GRP0")] == "Kind" and d[("Docs", "GRP0")] == "Kind"
 
 
-def test_backup_holds_pre_run_bytes(tmp_path):
-    import hashlib
-    (tmp_path / "k").mkdir()
-    orig = os.urandom(3000); (tmp_path / ".DS_Store").write_bytes(orig)
-    lst = tmp_path / "l"; write_list(lst, [str(tmp_path / "k")]); workers.run_main(str(lst))
-    h = hashlib.md5(str(tmp_path).encode()).hexdigest()[:12]
-    assert open(f"/tmp/dsstore_backups/{h}.DS_Store", "rb").read() == orig
+def test_unreadable_store_backed_up_outside_tmp(tmp_path):
+    """Only an unparseable store is replaced wholesale; its original bytes are
+    kept under ~/Library/Application Support (not /tmp, never overwritten)."""
+    home = tmp_path / "home"; (home / "p" / "k").mkdir(parents=True)
+    orig = os.urandom(3000); (home / "p" / ".DS_Store").write_bytes(orig)
+    lst = tmp_path / "l"; write_list(lst, [str(home / "p" / "k")])
+    env = dict(os.environ, HOME=str(home))
+    subprocess.run([sys.executable, "-c", f"import workers; workers.run_main({str(lst)!r})"],
+                   cwd=os.path.dirname(__file__), env=env, check=True)
+    bdir = home / "Library" / "Application Support" / "finder-view-fix" / "unreadable-backups"
+    kept = [f.read_bytes() for f in bdir.iterdir()]
+    assert kept == [orig] and stamped(str(home / "p" / "k"))
 
 
 @pytest.mark.parametrize("mode", ["serial", "threads", "processes"])
@@ -185,3 +191,22 @@ def test_make_targets_newline_name_does_not_break_pipeline(tmp_path):
     lst = tmp_path / "l"; write_list(lst, lines)
     out = workers.run_main(str(lst))
     assert "failed 0" in out and stamped(str(home / "ok"))
+
+
+def test_compliant_stores_not_rewritten_and_check_mode(tmp_path):
+    """The hourly job relies on this: a second run writes nothing, and --check
+    reports pending work without writing."""
+    ds = tree(tmp_path / "t", random.Random(7), 60)
+    lst = tmp_path / "l"; write_list(lst, ds)
+    run = lambda *a: subprocess.run([sys.executable, os.environ.get("BGS_PATH", os.path.join(REPO, "bulk_group_stamp.py")), *a, str(lst)],
+                                    capture_output=True, text=True)
+    r = run("--check"); assert r.returncode == 1 and not any(stamped(d) for d in ds)
+    assert run().returncode == 0 and all(stamped(d) for d in ds)
+    stores = {p: (os.stat(p).st_ino, os.stat(p).st_mtime_ns) for p in
+              (os.path.join(os.path.dirname(d), ".DS_Store") for d in ds)}
+    time.sleep(0.05)
+    assert run().returncode == 0
+    assert stores == {p: (os.stat(p).st_ino, os.stat(p).st_mtime_ns) for p in stores}, "compliant store rewritten"
+    assert run("--check").returncode == 0
+    new = os.path.join(ds[0], "brand new"); os.mkdir(new); write_list(lst, ds + [new])
+    assert run("--check").returncode == 1 and run().returncode == 0 and stamped(new)

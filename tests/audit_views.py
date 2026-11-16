@@ -75,7 +75,10 @@ if __name__ == "__main__":
     tot = 0; off = []
     for root in roots:
         for f in folders(root):
-            if not os.access(os.path.dirname(f.rstrip('/')) or "/", os.W_OK) and not os.access(f, os.W_OK): continue
+            par = os.path.dirname(f.rstrip('/')) or "/"
+            if not os.access(par, os.W_OK) and (not os.access(f, os.W_OK)
+                                                or (par + "/").startswith(os.path.join(HOME, "Library", "CloudStorage") + "/")):
+                continue   # Finder has nowhere to save this folder's view (README, Limits)
             tot += 1
             b = check(f)
             if b: off.append((f, b))

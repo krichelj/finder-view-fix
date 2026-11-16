@@ -39,6 +39,8 @@ check() {  # $1 folder, $2 image -> prints "L G" (1 = ok)
 # re-checked once (with Finder activated again) before it counts.
 while IFS= read -r d <&3; do
   i=$((i+1)); img="tests/shots/visual/$i.png"
+  # an empty folder has nothing to group: Finder shows a plain "Name" header
+  if [ -z "$(ls -A "$d" 2>/dev/null | grep -v '^\.')" ]; then echo "SKIP | empty folder, nothing to group | $d"; continue; fi
   R=$(check "$d" "$img" </dev/null) || { echo "ERR  | cannot open | $d"; F=1; continue; }
   if [ "$R" != "1 1" ]; then
     FRONT=$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true')

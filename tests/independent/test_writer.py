@@ -15,7 +15,7 @@ def names(rng, n, maxlen=60):
     return list(s)
 
 
-def check(path, expected_names, bgs_extra=None):
+def check(path, expected_names, unseeded=True):
     recs = dsparse.parse(path)                       # structure validated here
     keys = [(r[0], r[1]) for r in recs]
     assert len(keys) == len(set(keys)), "duplicate records"
@@ -24,8 +24,9 @@ def check(path, expected_names, bgs_extra=None):
     d = dsparse.as_dict(recs)
     for n in expected_names:
         assert d[(n, "GRP0")] == "Kind"
-        assert d[(n, "vstl")] == b"Nlsv"
-        assert plistlib.loads(d[(n, "lsvC")])["sortColumn"] == "name"
+        # view and sort are global defaults: never seeded per folder
+        if unseeded:
+            assert (n, "vstl") not in d and (n, "lsvC") not in d
     with DSStore.open(path, "r") as s:               # stock-library search path
         for n in expected_names:
             assert s[n]["GRP0"][1] == "Kind"
@@ -74,6 +75,19 @@ def test_dot_record_for_home(bgs, tmp_path):
     check(p, [".", ".hidden", "Documents"])
 
 
+def test_stamp_reports_change_only_when_needed(bgs):
+    recs = {}
+    assert bgs.stamp(recs, "a") is True
+    assert bgs.stamp(recs, "a") is False                      # already compliant
+    recs[("a", "vstl")] = ("type", b"Nlsv")
+    recs[("a", "lsvC")] = ("blob", plistlib.dumps({"sortColumn": "name"}, fmt=plistlib.FMT_BINARY))
+    assert bgs.stamp(recs, "a") is False                      # compliant view/sort left as is
+    recs[("a", "vstl")] = ("type", b"icnv")
+    assert bgs.stamp(recs, "a") is True and recs[("a", "vstl")][1] == b"Nlsv"
+    recs[("a", "GRP0")] = ("ustr", "None")
+    assert bgs.stamp(recs, "a") is True and recs[("a", "GRP0")][1] == "Kind"
+
+
 def test_foreign_records_preserved_and_sort_rewritten(bgs, tmp_path):
     p = str(tmp_path / ".DS_Store")
     lsvp = {"sortColumn": "dateModified", "iconSize": 16.0, "columns": {"name": {"width": 300}}}
@@ -87,7 +101,7 @@ def test_foreign_records_preserved_and_sort_rewritten(bgs, tmp_path):
     recs = bgs.read_records(p)
     bgs.stamp(recs, "A"); bgs.stamp(recs, "B")
     bgs.write_records(p, recs)
-    d = check(p, ["A", "B"])
+    d = check(p, ["A", "B"], unseeded=False)
     assert d[("B", "cmmt")] == "a comment"
     assert ("A", "Iloc") in d
     pl = plistlib.loads(d[("A", "lsvp")])

@@ -6,11 +6,7 @@
 # stamped one shows Kind group headers and the control shows none.
 # Needs Screen Recording for the calling app.
 set -u -o pipefail; cd "$(dirname "$0")/.."
-# The FinderViewEnforcer agent would group the control folder too: pause it.
-LABEL="com.krichelj.finderviewenforcer"; DOM="gui/$(id -u)"; PL="$HOME/Library/LaunchAgents/$LABEL.plist"
-AGENT=0; launchctl print "$DOM/$LABEL" >/dev/null 2>&1 && { AGENT=1; launchctl bootout "$DOM/$LABEL"; }
-FX=$(mktemp -d "$HOME/.fv_e2e.XXXX")
-trap 'rm -rf "$FX"; [ $AGENT = 1 ] && launchctl bootstrap "$DOM" "$PL"' EXIT
+FX=$(mktemp -d "$HOME/.fv_e2e.XXXX"); trap 'rm -rf "$FX"' EXIT
 for d in grouped control; do
   mkdir -p "$FX/$d/zsub"; echo x > "$FX/$d/notes.txt"; echo 'print(1)' > "$FX/$d/tool.py"; echo '#!/bin/sh' > "$FX/$d/run.sh"
 done

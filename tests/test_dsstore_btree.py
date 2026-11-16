@@ -50,8 +50,7 @@ for seed in range(40):
     got = json.loads(r.stdout)
     keys = [tuple(k) for k in got["order"]]
     data = got["data"]
-    bad = [nm for nm in oracle if data.get(nm, {}).get("GRP0") != "Kind" or data[nm].get("vstl") != "Nlsv"
-           or "sortColumn" not in data[nm].get("lsvC", "") or "name" not in data[nm].get("lsvC", "")]
+    bad = [nm for nm in oracle if data.get(nm, {}).get("GRP0") != "Kind"]
     dup = len(keys) != len(set(keys))
     if got["lookup_fail"]:
         bad.append(("lookup_fail", got["lookup_fail"]))
